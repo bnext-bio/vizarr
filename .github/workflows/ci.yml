@@ -50,6 +50,22 @@ jobs:
       - name: Verify entry point
         run: test -f dist/index.js
 
+  widget-bundle:
+    name: TypeScript / Widget bundle up-to-date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: true
+      - run: pnpm build:widget
+      - name: Verify committed widget bundle is up to date
+        run: |
+          if ! git diff --exit-code -- python/src/vizarr/_widget.js; then
+            echo "::error::python/src/vizarr/_widget.js is stale. Run 'pnpm build:widget' and commit the result."
+            exit 1
+          fi
+
   python-lint:
     name: Python / Lint
     runs-on: ubuntu-latest

@@ -1,8 +1,8 @@
 // TODO: Remove dependency on CDN for pdf.js source. Could use git submodule or
 // `deno bundle` since the pdf.js dist does not include ESM source code (only UMD or CJS).
-
-// @ts-ignore
-import { JpxImage } from "https://cdn.jsdelivr.net/gh/mozilla/pdf.js@30bd5f0/src/core/jpx.js";
+// NOTE: imported lazily (inside `decode`) so bundlers keep it as a runtime import
+// fetched only when JPEG2000 data is actually decoded, rather than on load.
+const JPX_URL = "https://cdn.jsdelivr.net/gh/mozilla/pdf.js@30bd5f0/src/core/jpx.js";
 
 export default class Jpeg2k {
   kind = "bytes_to_bytes" as const;
@@ -14,6 +14,8 @@ export default class Jpeg2k {
     throw new Error("encode not implemented");
   }
   async decode(data: Uint8Array): Promise<Uint8Array> {
+    // @ts-ignore - remote ESM module without type declarations
+    const { JpxImage } = await import(/* @vite-ignore */ JPX_URL);
     const img = new JpxImage();
     img.failOnCorruptedImage = true;
     img.parse(data);
