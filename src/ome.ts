@@ -114,25 +114,29 @@ export async function loadWell(
 
   sourceData.rows = rows;
   sourceData.columns = cols;
-  sourceData.onClick = (info: OnClickData) => {
-    let gridCoord = info.gridCoord;
-    if (!gridCoord) {
-      return;
-    }
-    const { row, column } = gridCoord;
-    let imgSource = undefined;
-    if (typeof config.source === "string" && grp.path && !Number.isNaN(row) && !Number.isNaN(column)) {
-      const field = row * cols + column;
-      imgSource = utils.join(config.source, imgPaths[field]);
-    }
-    if (config.onClick) {
-      info.layer = undefined;
-      info.imageSource = imgSource;
-      config.onClick(info);
-    } else if (imgSource) {
-      window.open(`${window.location.origin + window.location.pathname}?source=${imgSource}`);
-    }
-  };
+  // Attach a click handler only if a custom one is provided or the default
+  // open-in-new-window links are enabled (see `disable_well_links`).
+  if (config.onClick || !utils.coerceBoolean(config.disable_well_links)) {
+    sourceData.onClick = (info: OnClickData) => {
+      let gridCoord = info.gridCoord;
+      if (!gridCoord) {
+        return;
+      }
+      const { row, column } = gridCoord;
+      let imgSource = undefined;
+      if (typeof config.source === "string" && grp.path && !Number.isNaN(row) && !Number.isNaN(column)) {
+        const field = row * cols + column;
+        imgSource = utils.join(config.source, imgPaths[field]);
+      }
+      if (config.onClick) {
+        info.layer = undefined;
+        info.imageSource = imgSource;
+        config.onClick(info);
+      } else if (imgSource) {
+        window.open(`${window.location.origin + window.location.pathname}?source=${imgSource}`);
+      }
+    };
+  }
 
   return sourceData;
 }
@@ -257,30 +261,34 @@ export async function loadPlate(
     sourceData.acquisitions = plateAttrs.acquisitions;
     sourceData.acquisitionId = acquisitionId ?? -1;
   }
-  // Use onClick from image config or Open Well in new window
-  sourceData.onClick = (info: OnClickData) => {
-    let gridCoord = info.gridCoord;
-    if (!gridCoord) {
-      return;
-    }
-    const { row, column } = gridCoord;
-    let imgSource = undefined;
-    if (typeof config.source === "string" && grp.path && !Number.isNaN(row) && !Number.isNaN(column)) {
-      imgSource = utils.join(config.source, rows[row], columns[column]);
-    }
-    if (config.onClick) {
-      info.layer = undefined;
-      info.imageSource = imgSource;
-      config.onClick(info);
-    } else if (imgSource) {
-      const url = new URL(window.location.href);
-      url.searchParams.set("source", imgSource);
-      if (Number.isInteger(acquisitionId)) {
-        url.searchParams.set("acquisition", String(acquisitionId));
+  // Use onClick from image config or Open Well in new window.
+  // Attach a click handler only if a custom one is provided or the default
+  // open-in-new-window links are enabled (see `disable_well_links`).
+  if (config.onClick || !utils.coerceBoolean(config.disable_well_links)) {
+    sourceData.onClick = (info: OnClickData) => {
+      let gridCoord = info.gridCoord;
+      if (!gridCoord) {
+        return;
       }
-      window.open(decodeURIComponent(url.href));
-    }
-  };
+      const { row, column } = gridCoord;
+      let imgSource = undefined;
+      if (typeof config.source === "string" && grp.path && !Number.isNaN(row) && !Number.isNaN(column)) {
+        imgSource = utils.join(config.source, rows[row], columns[column]);
+      }
+      if (config.onClick) {
+        info.layer = undefined;
+        info.imageSource = imgSource;
+        config.onClick(info);
+      } else if (imgSource) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("source", imgSource);
+        if (Number.isInteger(acquisitionId)) {
+          url.searchParams.set("acquisition", String(acquisitionId));
+        }
+        window.open(decodeURIComponent(url.href));
+      }
+    };
+  }
   return sourceData;
 }
 

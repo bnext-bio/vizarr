@@ -126,7 +126,15 @@ class Viewer(anywidget.AnyWidget):
         source: str | zarr.Array | zarr.Group | np.ndarray | Store,
         **config: object,
     ) -> None:
-        """Add an image source to the viewer."""
+        """Add an image source to the viewer.
+
+        For plate/well grids, the click-to-open-well links are disabled by
+        default in the widget. Pass ``disable_well_links=False`` to re-enable
+        them.
+        """
+        # Default to no click-to-open-well links in the widget; the user can
+        # opt back in by passing disable_well_links=False.
+        config.setdefault("disable_well_links", True)
         if isinstance(source, str):
             config["source"] = source
         else:

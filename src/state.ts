@@ -33,6 +33,12 @@ interface BaseConfig {
   acquisition?: string;
   model_matrix?: string | number[];
   onClick?: (e: unknown) => void;
+  /**
+   * Disable the default click-to-open links on plate/well grids (opening an
+   * individual well or field in a new window). A custom `onClick` handler, if
+   * provided, is still invoked. Accepts a boolean or a URL query string.
+   */
+  disable_well_links?: boolean | string;
 }
 
 export interface MultichannelConfig extends BaseConfig {

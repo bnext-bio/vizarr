@@ -238,6 +238,9 @@ export function initLayerStateFromSource(source: SourceData & { id: string }): L
         loaders: source.loaders,
         columns: source.columns as number,
         rows: source.rows as number,
+        // Only enable picking (and the click-to-open overlay) when a click
+        // handler exists. Disabled via the `disable_well_links` config.
+        pickable: Boolean(source.onClick),
       },
       on: true,
     };

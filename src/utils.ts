@@ -217,6 +217,20 @@ export function isInterleaved(shape: number[]) {
   return lastDimSize === 3 || lastDimSize === 4;
 }
 
+/**
+ * Coerce a config value (which may arrive as a URL query string) to a boolean.
+ *
+ * A bare query flag (e.g. `?disable_well_links`) arrives as an empty string and
+ * is treated as `true`. Explicit falsy strings ("false", "0", "no", "off") are
+ * treated as `false`.
+ */
+export function coerceBoolean(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "boolean") return value;
+  const normalized = String(value).trim().toLowerCase();
+  return !["false", "0", "no", "off"].includes(normalized);
+}
+
 export function guessTileSize(arr: zarr.Array<zarr.DataType, zarr.Readable>) {
   const interleaved = isInterleaved(arr.shape);
   const [ySize, xSize] = arr.chunks.slice(interleaved ? -3 : -2);
@@ -702,6 +716,31 @@ if (import.meta.vitest) {
     it("false for typical zarr shapes", () => {
       expect(isInterleaved([1, 1, 256, 256])).toBe(false);
       expect(isInterleaved([512, 512])).toBe(false);
+    });
+  });
+
+  describe("coerceBoolean", () => {
+    it("treats a bare flag (empty string) as true", () => {
+      expect(coerceBoolean("")).toBe(true);
+    });
+
+    it("treats truthy strings as true", () => {
+      expect(coerceBoolean("true")).toBe(true);
+      expect(coerceBoolean("1")).toBe(true);
+      expect(coerceBoolean("yes")).toBe(true);
+    });
+
+    it("treats explicit falsy strings as false", () => {
+      expect(coerceBoolean("false")).toBe(false);
+      expect(coerceBoolean("0")).toBe(false);
+      expect(coerceBoolean("off")).toBe(false);
+      expect(coerceBoolean("NO")).toBe(false);
+    });
+
+    it("passes through booleans and handles undefined", () => {
+      expect(coerceBoolean(true)).toBe(true);
+      expect(coerceBoolean(false)).toBe(false);
+      expect(coerceBoolean(undefined)).toBe(false);
     });
   });
 

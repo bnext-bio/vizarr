@@ -37,6 +37,7 @@ def test_add_image_string_source():
 height: 500px
 stores: 0
 image[0]:
+  disable_well_links=True
   source=https://example.com/data.zarr\
 """)
 
@@ -49,6 +50,7 @@ height: 500px
 stores: 1
 image[0]:
   name=test
+  disable_well_links=True
   source={'id': 0}\
 """)
 
@@ -62,7 +64,20 @@ def test_add_image_zarr_array():
 height: 500px
 stores: 1
 image[0]:
+  disable_well_links=True
   source={'id': 0}\
+""")
+
+
+def test_add_image_can_reenable_well_links():
+    v = vizarr.Viewer()
+    v.add_image("https://example.com/plate.zarr", disable_well_links=False)
+    assert viewer_state(v) == snapshot("""\
+height: 500px
+stores: 0
+image[0]:
+  disable_well_links=False
+  source=https://example.com/plate.zarr\
 """)
 
 
@@ -75,9 +90,12 @@ def test_add_multiple_images():
 height: 500px
 stores: 1
 image[0]:
+  disable_well_links=True
   source=https://a.zarr
 image[1]:
+  disable_well_links=True
   source=https://b.zarr
 image[2]:
+  disable_well_links=True
   source={'id': 0}\
 """)
