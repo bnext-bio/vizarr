@@ -46,20 +46,27 @@ export async function loadWell(
   const imgAttrs = utils.resolveAttrs(first.attrs);
 
   utils.assert(utils.isMultiscales(imgAttrs), "Path for image is not valid.");
-  let resolution = imgAttrs.multiscales[0].datasets[0].path;
+  // Full resolution pyramid: every 'dataset' path from the first multiscales (highest → lowest)
+  const resolutions = imgAttrs.multiscales[0].datasets.map((dataset) => dataset.path);
 
-  // Create loader for every Image.
-  const promises = imgPaths.map((p) => {
-    const loc = grp.resolve(utils.join(p, resolution));
-    // @ts-expect-error - ok flag to avoid loading unused attrs
-    const arr: zarr.Array<zarr.DataType, zarr.Readable> = zarr.open(loc, { kind: "array", attrs: false });
-    return arr;
-  });
-  const data = await Promise.all(promises);
+  // Open the full resolution pyramid for every Image (field).
+  const data = await Promise.all(
+    imgPaths.map((p) =>
+      Promise.all(
+        resolutions.map(
+          (resolution) =>
+            // @ts-expect-error - ok flag to avoid loading unused attrs
+            zarr.open(grp.resolve(utils.join(p, resolution)), { kind: "array", attrs: false }) as Promise<
+              zarr.Array<zarr.DataType, zarr.Readable>
+            >,
+        ),
+      ),
+    ),
+  );
   const axes = utils.getNgffAxes(imgAttrs.multiscales);
   const axis_labels = utils.getNgffAxisLabels(axes);
 
-  const tileSize = utils.guessTileSize(data[0]);
+  const tileSize = utils.guessTileSize(data[0][0]);
   const loaders = utils.range(rows).flatMap((row) => {
     // filter to remove any empty row/col position
     return utils
@@ -71,7 +78,7 @@ export async function loadWell(
           name: String(offset),
           row,
           col,
-          loader: new ZarrPixelSource(data[offset], { labels: axis_labels, tileSize }),
+          loader: data[offset].map((arr) => new ZarrPixelSource(arr, { labels: axis_labels, tileSize })),
         };
       });
   });
@@ -80,16 +87,16 @@ export async function loadWell(
   if (utils.isOmeMultiscales(imgAttrs)) {
     meta = parseOmeroMeta(imgAttrs.omero, axes);
   } else {
-    const lowres = loaders.at(-1);
+    const lowres = loaders.at(-1)?.loader.at(-1);
     utils.assert(lowres, "Expected at least one resolution, found none.");
-    meta = await defaultMeta(lowres.loader, axis_labels);
+    meta = await defaultMeta(lowres, axis_labels);
   }
 
   const sourceData: SourceData = {
     loaders,
     ...meta,
     axis_labels,
-    loader: [loaders[0].loader],
+    loader: loaders[0].loader,
     model_matrix: utils.parseMatrix(config.model_matrix),
     defaults: {
       selection: meta.defaultSelection,
@@ -161,9 +168,9 @@ export async function loadPlate(
   });
   utils.assert("multiscales" in imgAttrs, "Path for image is not valid.");
 
-  // Lowest resolution is the 'path' of the last 'dataset' from the first multiscales
+  // Full resolution pyramid: the 'path' of every 'dataset' from the first multiscales (highest → lowest)
   const { datasets } = imgAttrs.multiscales[0];
-  const resolution = datasets[datasets.length - 1].path;
+  const resolutions = datasets.map((dataset) => dataset.path);
 
   async function getWellImageInfo(wellPath: string) {
     const wellAttrs = await utils.getAttrsOnly<{ well: Ome.Well }>(grp, {
@@ -192,41 +199,41 @@ export async function loadPlate(
   const wellImagePaths = wellImageInfos.map((info) => info.imagePath);
   const acquisitionIds = Array.from(new Set(wellImageInfos.flatMap((info) => info.acqIds)));
 
-  // Create loader for every Well. Some loaders may be undefined if Wells are missing.
-  const mapper = async ([key, path]: string[]) => {
-    // @ts-expect-error - we don't need the meta for these arrays
-    let arr: zarr.Array<zarr.DataType, zarr.Readable> = await zarr.open(grp.resolve(path), {
-      kind: "array",
-      attrs: false,
-    });
-    return [key, arr] as const;
+  // Open the full resolution pyramid for every Well.
+  const mapper = async (imagePath: string) => {
+    const arrs = await Promise.all(
+      resolutions.map(
+        (resolution) =>
+          // @ts-expect-error - we don't need the meta for these arrays
+          zarr.open(grp.resolve(utils.join(imagePath, resolution)), {
+            kind: "array",
+            attrs: false,
+          }) as Promise<zarr.Array<zarr.DataType, zarr.Readable>>,
+      ),
+    );
+    return [imagePath, arrs] as const;
   };
 
-  const promises = await pMap(
-    wellImagePaths.map((p) => [p, utils.join(p, resolution)]),
-    mapper,
-    { concurrency: 10 },
-  );
-  const data = await Promise.all(promises);
+  const data = await pMap(wellImagePaths, mapper, { concurrency: 10 });
   const axes = utils.getNgffAxes(imgAttrs.multiscales);
   const axis_labels = utils.getNgffAxisLabels(axes);
-  const tileSize = utils.guessTileSize(data[0][1]);
-  const loaders = data.map((d) => {
-    const [row, col] = d[0].split("/");
+  const tileSize = utils.guessTileSize(data[0][1][0]);
+  const loaders = data.map(([imagePath, arrs]) => {
+    const [row, col] = imagePath.split("/");
     return {
       name: `${row}${col}`,
       row: rows.indexOf(row),
       col: columns.indexOf(col),
-      loader: new ZarrPixelSource(d[1], { labels: axis_labels, tileSize }),
+      loader: arrs.map((arr) => new ZarrPixelSource(arr, { labels: axis_labels, tileSize })),
     };
   });
   let meta: Meta;
   if ("omero" in imgAttrs) {
     meta = parseOmeroMeta(imgAttrs.omero, axes);
   } else {
-    const lowres = loaders.at(-1);
+    const lowres = loaders.at(-1)?.loader.at(-1);
     utils.assert(lowres, "Expected at least one resolution, found none.");
-    meta = await defaultMeta(lowres.loader, axis_labels);
+    meta = await defaultMeta(lowres, axis_labels);
   }
 
   // Load Image to use for channel names, rendering settings, sizeZ, sizeT etc.
@@ -234,7 +241,7 @@ export async function loadPlate(
     loaders,
     ...meta,
     axis_labels,
-    loader: [loaders[0].loader],
+    loader: loaders[0].loader,
     model_matrix: utils.parseMatrix(config.model_matrix),
     defaults: {
       selection: meta.defaultSelection,
