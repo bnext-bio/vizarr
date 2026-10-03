@@ -126,6 +126,7 @@ class GridLayer extends CompositeLayer<CompositeLayerProps & GridLayerProps> {
         getLineColor: [0, 0, 0, 0],
         modelMatrix: baseModelMatrix,
         pickable: true, // enable picking
+        onClick: this.props.onClick, // forward grid click (row/col) to the handler
         id: `${id}-GridLayer-picking`,
       } satisfies SolidPolygonLayerProps<Data>;
       const layer = new SolidPolygonLayer<Data, SolidPolygonLayerProps<Data>>(layerProps);
