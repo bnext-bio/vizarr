@@ -93,6 +93,54 @@ function get_source(model, source) {
  */
 
 /**
+ * Image config keys read from a static model, e.g. the JSON body of a MyST
+ * `{anywidget}` directive (whose model can't enumerate its keys).
+ */
+const IMAGE_CONFIG_KEYS = [
+	"source",
+	"name",
+	"axis_labels",
+	"colormap",
+	"opacity",
+	"acquisition",
+	"model_matrix",
+	"disable_well_links",
+	"scalebar",
+	"overlay",
+	"description",
+	"color",
+	"contrast_limits",
+	"visibility",
+	"colors",
+	"channel_axis",
+	"names",
+	"visibilities",
+];
+
+/**
+ * Image configs for a model without `_configs` (i.e. not the Python widget):
+ * either an `images` array of configs, or a single config at the top level.
+ *
+ * @param {import("npm:@anywidget/types").AnyModel} model
+ * @returns {Record<string, unknown>[]}
+ */
+function get_static_configs(model) {
+	/** @type {Record<string, unknown>[]} */
+	const images = [...(model.get("images") ?? [])];
+	if (images.length === 0 && model.get("source") !== undefined) {
+		/** @type {Record<string, unknown>} */
+		const config = {};
+		for (const key of IMAGE_CONFIG_KEYS) {
+			const value = model.get(key);
+			if (value !== undefined) config[key] = value;
+		}
+		images.push(config);
+	}
+	// Default to no click-to-open-well links, which would point at the host page.
+	return images.map((config) => ({ disable_well_links: true, ...config }));
+}
+
+/**
  * @typedef ViewState
  * @property {number} zoom
  * @property {[x: number, y: number]} target
@@ -103,14 +151,19 @@ export default {
 	async render({ model, el }) {
 		let div = document.createElement("div");
 		{
-			div.style.height = model.get("height");
+			div.style.height = model.get("height") ?? "500px";
+			div.style.position = "relative";
 			div.style.backgroundColor = "black";
 			model.on("change:height", () => {
 				div.style.height = model.get("height");
 			});
 		}
-		let viewer = await vizarr.createViewer(div);
+		// Attach before creating the viewer so it can detect a Shadow DOM host.
+		el.appendChild(div);
+		let viewer = await vizarr.createViewer(div, { menuOpen: model.get("menuOpen") ?? true });
 		{
+			const view_state = model.get("view_state");
+			if (view_state?.target) viewer.setViewState(view_state);
 			model.on("change:view_state", () => {
 				viewer.setViewState(model.get("view_state"));
 			});
@@ -118,9 +171,16 @@ export default {
 				"viewStateChange",
 				debounce((/** @type {ViewState} */ update) => {
 					model.set("view_state", update);
-					model.save_changes();
+					model.save_changes?.();
 				}, 200),
 			);
+		}
+		if (model.get("_configs") === undefined) {
+			// Static host (e.g. MyST): configs come from the model's initial JSON.
+			for (const config of get_static_configs(model)) {
+				viewer.addImage(/** @type {any} */ (config));
+			}
+			return;
 		}
 		{
 			// sources are append-only now
@@ -135,6 +195,5 @@ export default {
 				viewer.addImage({ ...last, source });
 			});
 		}
-		el.appendChild(div);
 	},
 };

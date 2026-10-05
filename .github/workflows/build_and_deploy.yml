@@ -17,6 +17,10 @@ jobs:
           run_install: true
       - run: |
           pnpm build
+          # Publish the anywidget bundle so static hosts (e.g. MyST's
+          # `{anywidget}` directive) can load it from <pages-url>/widget.mjs.
+          pnpm build:widget
+          cp python/src/vizarr/_widget.js dist/widget.mjs
           touch dist/.nojekyll
 
       - name: Deploy 🚀
