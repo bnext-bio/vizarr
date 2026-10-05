@@ -104,6 +104,8 @@ export async function loadWell(
       opacity: config.opacity ?? 1,
     },
     name: `Well ${row}${col}`,
+    pixel_size: utils.getPhysicalPixelSize(imgAttrs.multiscales),
+    cell_label: "Field",
   };
 
   if (acquisitions.length > 0) {
@@ -255,6 +257,8 @@ export async function loadPlate(
     name: plateAttrs.name || "Plate",
     rows: rows.length,
     columns: columns.length,
+    pixel_size: utils.getPhysicalPixelSize(imgAttrs.multiscales),
+    cell_label: "Well",
   };
   if ((plateAttrs.acquisitions?.length ?? 0) > 0 && acquisitionIds.length > 1) {
     // To show acquisition chooser in UI
@@ -329,6 +333,7 @@ export async function loadOmeMultiscales(
     },
     ...meta,
     name: meta.name ?? name,
+    pixel_size: utils.getPhysicalPixelSize(attrs.multiscales),
     labels: await Promise.all(labels.map((name) => loadOmeImageLabel(grp.resolve("labels"), name))),
   };
 }

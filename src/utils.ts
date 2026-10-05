@@ -156,7 +156,7 @@ export function getNgffAxes(multiscales: Ome.Multiscale[]): Ome.Axis[] {
     if (name === "c") return "channel";
     return "space";
   }
-  let axes = default_axes;
+  let axes: Ome.Axis[] = default_axes;
   // v0.3 & v0.4+
   if (multiscales[0].axes) {
     axes = multiscales[0].axes.map((axis) => {
@@ -164,11 +164,30 @@ export function getNgffAxes(multiscales: Ome.Multiscale[]): Ome.Axis[] {
       if (typeof axis === "string") {
         return { name: axis, type: getDefaultType(axis) };
       }
-      const { name, type } = axis;
-      return { name, type: type ?? getDefaultType(name) };
+      const { name, type, unit } = axis;
+      return { name, type: type ?? getDefaultType(name), ...(unit ? { unit } : {}) };
     });
   }
   return axes;
+}
+
+/**
+ * Physical size of one base-resolution pixel along x, from the x axis `unit` and
+ * the first dataset's `coordinateTransformations` (OME-NGFF v0.4+). Returns
+ * undefined when the metadata doesn't declare a unit for the x axis.
+ */
+export function getPhysicalPixelSize(multiscales: Ome.Multiscale[]): { size: number; unit: string } | undefined {
+  const axes = getNgffAxes(multiscales);
+  const xIndex = axes.findIndex((axis) => axis.type === "space" && axis.name === "x");
+  const unit = axes[xIndex]?.unit;
+  if (!unit) return undefined;
+  let size = 1;
+  for (const transform of multiscales[0].datasets[0]?.coordinateTransformations ?? []) {
+    if (transform.type === "scale" && transform.scale.length === axes.length) {
+      size *= transform.scale[xIndex];
+    }
+  }
+  return Number.isFinite(size) && size > 0 ? { size, unit } : undefined;
 }
 
 export function getNgffAxisLabels(axes: Ome.Axis[]): [...string[], "y", "x"] {
@@ -660,6 +679,51 @@ if (import.meta.vitest) {
         { name: "y", type: "space" },
         { name: "x", type: "space" },
       ]);
+    });
+
+    it("keeps v0.4 axis units", () => {
+      const axes = getNgffAxes([
+        {
+          datasets: [{ path: "0" }],
+          axes: [
+            { name: "c", type: "channel" },
+            { name: "x", unit: "micrometer" },
+          ],
+        },
+      ] satisfies Ome.Multiscale[]);
+      expect(axes).toEqual([
+        { name: "c", type: "channel" },
+        { name: "x", type: "space", unit: "micrometer" },
+      ]);
+    });
+  });
+
+  describe("getPhysicalPixelSize", () => {
+    const axes = [
+      { name: "c", type: "channel" },
+      { name: "y", type: "space", unit: "micrometer" },
+      { name: "x", type: "space", unit: "micrometer" },
+    ];
+
+    it("reads the x scale and unit of the first dataset", () => {
+      const size = getPhysicalPixelSize([
+        {
+          axes,
+          datasets: [
+            { path: "0", coordinateTransformations: [{ type: "scale", scale: [1, 0.5, 0.65] }] },
+            { path: "1", coordinateTransformations: [{ type: "scale", scale: [1, 1, 1.3] }] },
+          ],
+        },
+      ]);
+      expect(size).toEqual({ size: 0.65, unit: "micrometer" });
+    });
+
+    it("defaults to a unit scale when there is no scale transform", () => {
+      expect(getPhysicalPixelSize([{ axes, datasets: [{ path: "0" }] }])).toEqual({ size: 1, unit: "micrometer" });
+    });
+
+    it("returns undefined without a unit", () => {
+      expect(getPhysicalPixelSize([{ datasets: [{ path: "0" }] }])).toBeUndefined();
     });
   });
 

@@ -17,6 +17,9 @@ export interface GridLoader {
 
 type Polygon = Array<[number, number]>;
 
+/** Default gap (in base-resolution pixels) between grid cells. */
+export const DEFAULT_GRID_SPACER = 5;
+
 export interface GridLayerProps
   extends Omit<CompositeLayerProps, "loaders" | "modelMatrix" | "opacity" | "onClick" | "id">,
     BaseLayerProps {
@@ -52,7 +55,7 @@ class GridLayer extends CompositeLayer<CompositeLayerProps & GridLayerProps> {
     ...MultiscaleImageLayer.defaultProps,
     // Special grid props
     loaders: { type: "array", value: [], compare: true },
-    spacer: { type: "number", value: 5, compare: true },
+    spacer: { type: "number", value: DEFAULT_GRID_SPACER, compare: true },
     rows: { type: "number", value: 0, compare: true },
     columns: { type: "number", value: 0, compare: true },
     text: { type: "boolean", value: false, compare: true },

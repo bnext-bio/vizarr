@@ -3,17 +3,20 @@ import { OrthographicView } from "deck.gl";
 import { useAtomValue } from "jotai";
 import * as React from "react";
 import { useViewState } from "../hooks";
+import { DEFAULT_GRID_SPACER } from "../layers/grid-layer";
 import { layerAtoms } from "../state";
 import { fitImageToViewport, isGridLayerProps, isInterleaved, resolveLoaderFromLayerProps } from "../utils";
 
 import type { DeckGLRef, OrthographicViewState } from "deck.gl";
 import type { VizarrLayer } from "../state";
+import Overlays from "./Overlays";
 
 export default function Viewer() {
   const deckRef = React.useRef<DeckGLRef>(null);
   const [viewState, setViewState] = useViewState();
   const layers = useAtomValue(layerAtoms);
   const firstLayer = layers[0];
+  const [viewport, setViewport] = React.useState<{ width: number; height: number } | null>(null);
 
   // If viewState hasn't been updated, use the first loader to guess viewState
   // TODO: There is probably a better place / way to set the intital view and this is a hack.
@@ -29,17 +32,25 @@ export default function Viewer() {
     );
   }
 
+  const deck = deckRef.current?.deck;
   return (
-    <DeckGL
-      ref={deckRef}
-      layers={layers}
-      viewState={viewState && { ortho: viewState }}
-      onViewStateChange={(e: { viewState: OrthographicViewState }) =>
-        // @ts-expect-error - deck doesn't know this should be ok
-        setViewState(e.viewState)
-      }
-      views={[new OrthographicView({ id: "ortho", controller: true })]}
-    />
+    <>
+      <DeckGL
+        ref={deckRef}
+        layers={layers}
+        viewState={viewState && { ortho: viewState }}
+        onViewStateChange={(e: { viewState: OrthographicViewState }) =>
+          // @ts-expect-error - deck doesn't know this should be ok
+          setViewState(e.viewState)
+        }
+        onResize={setViewport}
+        views={[new OrthographicView({ id: "ortho", controller: true })]}
+      />
+      <Overlays
+        viewState={viewState}
+        viewport={viewport ?? (deck ? { width: deck.width, height: deck.height } : null)}
+      />
+    </>
   );
 }
 
@@ -51,7 +62,7 @@ function getLayerSize({ props }: VizarrLayer) {
   if (isGridLayerProps(props)) {
     // TODO: Don't hardcode spacer size. Probably best to inspect the deck.gl Layers rather than
     // the Layer Props.
-    const spacer = 5;
+    const spacer = DEFAULT_GRID_SPACER;
     height = (height + spacer) * props.rows;
     width = (width + spacer) * props.columns;
   }

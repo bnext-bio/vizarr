@@ -1,6 +1,6 @@
 import { type Atom, atom } from "jotai";
 import { atomFamily, splitAtom, waitForAll } from "jotai/utils";
-import { RedirectError, rethrowUnless } from "./utils";
+import { RedirectError, coerceBoolean, rethrowUnless } from "./utils";
 
 import type { Layer } from "deck.gl";
 import type { PrimitiveAtom } from "jotai";
@@ -39,6 +39,20 @@ interface BaseConfig {
    * provided, is still invoked. Accepts a boolean or a URL query string.
    */
   disable_well_links?: boolean | string;
+  /**
+   * Show a scale bar derived from the OME-NGFF axis units and scale transforms
+   * (default: true). Falls back to base-resolution pixels when there is no unit.
+   * Accepts a boolean or a URL query string. Read from the first image added.
+   */
+  scalebar?: boolean | string;
+  /**
+   * Show an info overlay with the image/plate name and, once zoomed in on a
+   * plate or well, the well (and field) under the center of the view
+   * (default: true). Accepts a boolean or a URL query string.
+   */
+  overlay?: boolean | string;
+  /** Optional free-text description shown in the info overlay. */
+  description?: string;
 }
 
 export interface MultichannelConfig extends BaseConfig {
@@ -90,6 +104,12 @@ export type SourceData = {
   axis_labels: string[];
   onClick?: (e: OnClickData) => void;
   labels?: ImageLabels;
+  /** Physical size of one base-resolution pixel along x, if the metadata has units. */
+  pixel_size?: { size: number; unit: string };
+  /** Label for grid cells in the info overlay, e.g. "Well" (plate) or "Field" (well). */
+  cell_label?: string;
+  /** Info overlay & scale bar settings, resolved from the config in `addImageAtom`. */
+  display?: { scalebar: boolean; overlay: boolean; description?: string };
 };
 
 type LayerType = "image" | "multiscale" | "grid";
@@ -128,6 +148,11 @@ export const addImageAtom = atom(null, async (get, set, config: ImageLayerConfig
 
   try {
     const sourceData = await createSourceData(config);
+    sourceData.display = {
+      scalebar: config.scalebar === undefined || coerceBoolean(config.scalebar),
+      overlay: config.overlay === undefined || coerceBoolean(config.overlay),
+      description: config.description,
+    };
     const prevSourceInfo = get(sourceInfoAtom);
     if (!sourceData.name) {
       sourceData.name = `image_${Object.keys(prevSourceInfo).length}`;
