@@ -131,6 +131,11 @@ class Viewer(anywidget.AnyWidget):
         For plate/well grids, the click-to-open-well links are disabled by
         default in the widget. Pass ``disable_well_links=False`` to re-enable
         them.
+
+        A scale bar (from the OME-NGFF axis units and scale) and an info
+        overlay (image/plate name, plus the well under the view once zoomed
+        in) are shown by default. Pass ``scalebar=False`` or ``overlay=False``
+        to hide them, and ``description="..."`` to add text to the overlay.
         """
         # Default to no click-to-open-well links in the widget; the user can
         # opt back in by passing disable_well_links=False.
