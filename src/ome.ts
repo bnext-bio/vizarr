@@ -357,10 +357,10 @@ async function loadOmeImageLabel(root: zarr.Location<zarr.Readable>, name: strin
   };
 }
 
-async function resolveOmeLabelsFromMultiscales(grp: zarr.Group<zarr.Readable>): Promise<Array<string>> {
+export async function resolveOmeLabelsFromMultiscales(grp: zarr.Group<zarr.Readable>): Promise<Array<string>> {
   return zarr
     .open(grp.resolve("labels"), { kind: "group" })
-    .then(({ attrs }) => (attrs.labels ?? []) as Array<string>)
+    .then(({ attrs }) => (utils.resolveAttrs(attrs).labels ?? []) as Array<string>)
     .catch((e) => {
       utils.rethrowUnless(e, zarr.NodeNotFoundError);
       return [];
@@ -435,6 +435,30 @@ export function parseOmeroMeta({ rdefs, channels, name }: Ome.Omero, axes: Ome.A
 
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
+
+  describe("resolveOmeLabelsFromMultiscales", () => {
+    function imageWithLabelsGroup(labelsAttrs: Record<string, unknown>) {
+      const store = new Map<string, Uint8Array>();
+      const meta = { zarr_format: 3, node_type: "group", attributes: labelsAttrs };
+      store.set("/labels/zarr.json", new TextEncoder().encode(JSON.stringify(meta)));
+      return new zarr.Group(store, "/", { zarr_format: 3, node_type: "group", attributes: {} });
+    }
+
+    it("reads v0.4 labels (top-level attributes)", async () => {
+      const grp = imageWithLabelsGroup({ labels: ["cells"] });
+      expect(await resolveOmeLabelsFromMultiscales(grp)).toEqual(["cells"]);
+    });
+
+    it("reads v0.5 labels (nested under 'ome')", async () => {
+      const grp = imageWithLabelsGroup({ ome: { version: "0.5", labels: ["cells"] } });
+      expect(await resolveOmeLabelsFromMultiscales(grp)).toEqual(["cells"]);
+    });
+
+    it("returns no labels when there is no labels group", async () => {
+      const grp = new zarr.Group(new Map(), "/", { zarr_format: 3, node_type: "group", attributes: {} });
+      expect(await resolveOmeLabelsFromMultiscales(grp)).toEqual([]);
+    });
+  });
 
   describe("parseOmeroMeta", () => {
     const axes: Ome.Axis[] = [
