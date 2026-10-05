@@ -1,7 +1,8 @@
 import { Link, Typography } from "@material-ui/core";
-import { ThemeProvider, makeStyles } from "@material-ui/styles";
+import { StylesProvider, ThemeProvider, jssPreset, makeStyles } from "@material-ui/styles";
 import { type PrimitiveAtom, Provider, atom } from "jotai";
 import { useAtomValue, useSetAtom } from "jotai";
+import { create as createJss } from "jss";
 import * as React from "react";
 import ReactDOM from "react-dom/client";
 
@@ -33,6 +34,38 @@ export interface VizarrViewer {
   setViewState(viewState: ViewState): void;
   on<E extends keyof Events>(event: E, cb: (data: Events[E]) => void): void;
   destroy(): void;
+}
+
+/**
+ * When the viewer is mounted inside a Shadow DOM (e.g. the MyST `{anywidget}`
+ * directive), styles injected into `document.head` and popovers portaled to
+ * `document.body` don't reach it. Inject JSS styles into the shadow root and
+ * portal popovers into it instead.
+ */
+function ShadowRootStyles({ shadowRoot, children }: { shadowRoot: ShadowRoot; children: React.ReactNode }) {
+  const [{ jss, viewerTheme }] = React.useState(() => {
+    const insertionPoint = document.createComment("vizarr-jss");
+    shadowRoot.prepend(insertionPoint);
+    const portalContainer = document.createElement("div");
+    shadowRoot.append(portalContainer);
+    return {
+      jss: createJss({ ...jssPreset(), insertionPoint }),
+      viewerTheme: {
+        ...theme,
+        props: {
+          ...theme.props,
+          // Focus enforcement relies on document.activeElement (the shadow host), and
+          // the scroll lock expects the container to have a parent element.
+          MuiPopover: { container: portalContainer, disableEnforceFocus: true, disableScrollLock: true },
+        },
+      },
+    };
+  });
+  return (
+    <StylesProvider jss={jss}>
+      <ThemeProvider theme={viewerTheme}>{children}</ThemeProvider>
+    </StylesProvider>
+  );
 }
 
 const useStyles = makeStyles({
@@ -114,14 +147,21 @@ export function createViewer(element: HTMLElement, options: { menuOpen?: boolean
     );
   }
   let root = ReactDOM.createRoot(element);
+  const app = (
+    <Provider>
+      <ViewStateContext.Provider value={viewStateAtomWithEffect}>
+        <App />
+      </ViewStateContext.Provider>
+    </Provider>
+  );
+  // `element` must already be attached for its shadow root (if any) to be found.
+  const rootNode = element.getRootNode();
   root.render(
-    <ThemeProvider theme={theme}>
-      <Provider>
-        <ViewStateContext.Provider value={viewStateAtomWithEffect}>
-          <App />
-        </ViewStateContext.Provider>
-      </Provider>
-    </ThemeProvider>,
+    rootNode instanceof ShadowRoot ? (
+      <ShadowRootStyles shadowRoot={rootNode}>{app}</ShadowRootStyles>
+    ) : (
+      <ThemeProvider theme={theme}>{app}</ThemeProvider>
+    ),
   );
   return promise;
 }

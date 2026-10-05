@@ -41,6 +41,9 @@ importers:
       jotai:
         specifier: ^1.0.0
         version: 1.13.1(@babel/core@7.29.0)(@babel/template@7.28.6)(react@18.3.1)
+      jss:
+        specifier: ^10.10.0
+        version: 10.10.0
       just-debounce-it:
         specifier: ^3.1.1
         version: 3.2.0
