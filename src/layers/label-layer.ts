@@ -129,7 +129,7 @@ export class LabelLayer extends TileLayer<LabelPixelData, LabelLayerProps> {
             addressModeU: "clamp-to-edge",
             addressModeV: "clamp-to-edge",
           },
-          format: "rgba8unorm",
+          format: "rgba8uint",
         }),
       });
     }
@@ -142,16 +142,11 @@ export class GrayscaleBitmapLayer extends BitmapLayer<{ pixelData: LabelPixelDat
   state!: { texture: Texture } & BitmapLayer["state"];
 
   getShaders() {
-    const sampler = (
-      {
-        Uint8Array: "usampler2D",
-        Uint16Array: "usampler2D",
-        Uint32Array: "usampler2D",
-        Int8Array: "isampler2D",
-        Int16Array: "isampler2D",
-        Int32Array: "isampler2D",
-      } as const
-    )[typedArrayConstructorName(this.props.pixelData.data)];
+    // Both samplers must have the same type: luma.gl validates the program right
+    // after linking, when every sampler still points at texture unit 0, and WebGL
+    // rejects samplers of different types sharing a unit. Signed label data is
+    // uploaded as unsigned (see `toUnsigned`), and the color LUT as rgba8uint.
+    const sampler = "usampler2D";
     // replace the builtin fragment shader with our own
     return {
       ...super.getShaders(),
@@ -164,7 +159,7 @@ precision highp int;
 precision highp ${sampler};
 
 uniform ${sampler} grayscaleTexture;
-uniform sampler2D colorTexture;
+uniform ${sampler} colorTexture;
 uniform float colorTextureWidth;
 uniform float colorTextureHeight;
 uniform float opacity;
@@ -177,7 +172,7 @@ void main() {
   float x = (mod(float(index), colorTextureWidth) + 0.5) / colorTextureWidth;
   float y = (floor(float(index) / colorTextureWidth) + 0.5) / colorTextureHeight;
   vec2 uv = vec2(x, y);
-  vec3 color = texture(colorTexture, uv).rgb;
+  vec3 color = vec3(texture(colorTexture, uv).rgb) / 255.0;
   fragColor = vec4(color, ((index > 0) ? 1.0 : 0.0) * opacity);
 }
 `,
@@ -188,11 +183,12 @@ void main() {
     super.updateState({ props, oldProps, changeFlags, ...rest });
     if (props.pixelData !== oldProps.pixelData) {
       this.state.texture?.destroy();
+      const data = toUnsigned(props.pixelData.data);
       this.setState({
         texture: this.context.device.createTexture({
           width: props.pixelData.width,
           height: props.pixelData.height,
-          data: props.pixelData.data,
+          data,
           dimension: "2d",
           mipmaps: false,
           sampler: {
@@ -201,16 +197,7 @@ void main() {
             addressModeU: "clamp-to-edge",
             addressModeV: "clamp-to-edge",
           },
-          format: (
-            {
-              Uint8Array: "r8uint",
-              Uint16Array: "r16uint",
-              Uint32Array: "r32uint",
-              Int8Array: "r8sint",
-              Int16Array: "r16sint",
-              Int32Array: "r32sint",
-            } as const
-          )[typedArrayConstructorName(props.pixelData.data)],
+          format: ({ 1: "r8uint", 2: "r16uint", 4: "r32uint" } as const)[data.BYTES_PER_ELEMENT as 1 | 2 | 4],
         }),
       });
     }
@@ -224,6 +211,7 @@ void main() {
       model.setUniforms({
         colorTextureWidth: colorTexture.width,
         colorTextureHeight: colorTexture.height,
+        opacity: this.props.opacity,
       });
       model.setBindings({
         grayscaleTexture: texture,
@@ -313,6 +301,18 @@ const DEFAULT_COLOR_TEXTURE = Uint8Array.from(
     [255, 255, 255],
   ].flatMap((color) => [...color, 255]),
 );
+
+/**
+ * Reinterprets signed label data as unsigned of the same width. Negative labels
+ * become 0 (background), which is how the shader already renders them.
+ */
+function toUnsigned(data: zarr.TypedArray<LabelDataType>): Uint8Array | Uint16Array | Uint32Array {
+  if (data instanceof Uint8Array || data instanceof Uint16Array || data instanceof Uint32Array) return data;
+  const Unsigned = data instanceof Int8Array ? Uint8Array : data instanceof Int16Array ? Uint16Array : Uint32Array;
+  const out = new Unsigned(data.length);
+  for (let i = 0; i < data.length; i++) out[i] = Math.max(0, data[i]);
+  return out;
+}
 
 function typedArrayConstructorName(arr: zarr.TypedArray<LabelDataType>) {
   const ArrayType = arr.constructor as zarr.TypedArrayConstructor<LabelDataType>;
