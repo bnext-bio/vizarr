@@ -230,22 +230,6 @@ export function initLayerStateFromSource(source: SourceData & { id: string }): L
     onClick: source.onClick,
   } satisfies BaseLayerProps;
 
-  if (source.loaders) {
-    return {
-      kind: "grid",
-      layerProps: {
-        ...layerProps,
-        loaders: source.loaders,
-        columns: source.columns as number,
-        rows: source.rows as number,
-        // Only enable picking (and the click-to-open overlay) when a click
-        // handler exists. Disabled via the `disable_well_links` config.
-        pickable: Boolean(source.onClick),
-      },
-      on: true,
-    };
-  }
-
   let labels = undefined;
   if (source.labels && source.labels.length > 0) {
     labels = source.labels.map((label, i) => ({
@@ -259,6 +243,23 @@ export function initLayerStateFromSource(source: SourceData & { id: string }): L
         colors: label.colors,
       },
     }));
+  }
+
+  if (source.loaders) {
+    return {
+      kind: "grid",
+      layerProps: {
+        ...layerProps,
+        loaders: source.loaders,
+        columns: source.columns as number,
+        rows: source.rows as number,
+        // Only enable picking (and the click-to-open overlay) when a click
+        // handler exists. Disabled via the `disable_well_links` config.
+        pickable: Boolean(source.onClick),
+      },
+      on: true,
+      labels,
+    };
   }
 
   if (source.loader.length === 1) {

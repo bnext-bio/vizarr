@@ -2,7 +2,9 @@ import pMap from "p-map";
 import * as zarr from "zarrita";
 import type { ImageLabels, ImageLayerConfig, OnClickData, SourceData } from "./state";
 
+import type { Matrix4 } from "math.gl";
 import { ZarrPixelSource } from "./ZarrPixelSource";
+import type { GridCellLabel, GridLoader } from "./layers/grid-layer";
 import type { OmeColor } from "./layers/label-layer";
 import * as utils from "./utils";
 
@@ -66,8 +68,12 @@ export async function loadWell(
   const axes = utils.getNgffAxes(imgAttrs.multiscales);
   const axis_labels = utils.getNgffAxisLabels(axes);
 
+  // Labels: metadata from the first field, label pyramids for every field.
+  const labelSpecs = await loadGridLabelSpecs(first, imgAttrs.multiscales);
+  const fieldLabels = await Promise.all(imgPaths.map((p) => openGridCellLabels(grp.resolve(p), labelSpecs)));
+
   const tileSize = utils.guessTileSize(data[0][0]);
-  const loaders = utils.range(rows).flatMap((row) => {
+  const loaders: GridLoader[] = utils.range(rows).flatMap((row) => {
     // filter to remove any empty row/col position
     return utils
       .range(cols)
@@ -79,6 +85,7 @@ export async function loadWell(
           row,
           col,
           loader: data[offset].map((arr) => new ZarrPixelSource(arr, { labels: axis_labels, tileSize })),
+          labels: fieldLabels[offset],
         };
       });
   });
@@ -106,6 +113,7 @@ export async function loadWell(
     name: `Well ${row}${col}`,
     pixel_size: utils.getPhysicalPixelSize(imgAttrs.multiscales),
     cell_label: "Field",
+    labels: resolveGridLabels(labelSpecs, loaders),
   };
 
   if (acquisitions.length > 0) {
@@ -201,6 +209,9 @@ export async function loadPlate(
       acqIds,
     };
   }
+  // Labels: metadata from the first well's image (like the resolutions above).
+  const labelSpecs = await loadGridLabelSpecs(grp.resolve(utils.join(wellPaths[0], imgPath)), imgAttrs.multiscales);
+
   const wellImageInfos = await Promise.all(wellPaths.map(getWellImageInfo));
   const wellImagePaths = wellImageInfos.map((info) => info.imagePath);
   const acquisitionIds = Array.from(new Set(wellImageInfos.flatMap((info) => info.acqIds)));
@@ -217,20 +228,22 @@ export async function loadPlate(
           }) as Promise<zarr.Array<zarr.DataType, zarr.Readable>>,
       ),
     );
-    return [imagePath, arrs] as const;
+    const labels = await openGridCellLabels(grp.resolve(imagePath), labelSpecs);
+    return [imagePath, arrs, labels] as const;
   };
 
   const data = await pMap(wellImagePaths, mapper, { concurrency: 10 });
   const axes = utils.getNgffAxes(imgAttrs.multiscales);
   const axis_labels = utils.getNgffAxisLabels(axes);
   const tileSize = utils.guessTileSize(data[0][1][0]);
-  const loaders = data.map(([imagePath, arrs]) => {
+  const loaders: GridLoader[] = data.map(([imagePath, arrs, labels]) => {
     const [row, col] = imagePath.split("/");
     return {
       name: `${row}${col}`,
       row: rows.indexOf(row),
       col: columns.indexOf(col),
       loader: arrs.map((arr) => new ZarrPixelSource(arr, { labels: axis_labels, tileSize })),
+      labels,
     };
   });
   let meta: Meta;
@@ -259,6 +272,7 @@ export async function loadPlate(
     columns: columns.length,
     pixel_size: utils.getPhysicalPixelSize(imgAttrs.multiscales),
     cell_label: "Well",
+    labels: resolveGridLabels(labelSpecs, loaders),
   };
   if ((plateAttrs.acquisitions?.length ?? 0) > 0 && acquisitionIds.length > 1) {
     // To show acquisition chooser in UI
@@ -348,16 +362,111 @@ async function loadOmeImageLabel(root: zarr.Location<zarr.Readable>, name: strin
   const tileSize = utils.guessTileSize(baseResolution);
   const axes = utils.getNgffAxes(attrs.multiscales);
   const labels = utils.getNgffAxisLabels(axes);
-  const colors = (attrs["image-label"].colors ?? []).map((d) => ({ labelValue: d["label-value"], rgba: d.rgba }));
   return {
     name,
     modelMatrix: utils.coordinateTransformationsToMatrix(attrs.multiscales),
     loader: data.map((arr) => new ZarrPixelSource(arr, { labels, tileSize })),
-    colors: colors.length > 0 ? colors : undefined,
+    colors: parseLabelColors(attrs["image-label"]),
   };
 }
 
-export async function resolveOmeLabelsFromMultiscales(grp: zarr.Group<zarr.Readable>): Promise<Array<string>> {
+function parseLabelColors(imageLabel: Ome.ImageLabel): Array<OmeColor> | undefined {
+  const colors = (imageLabel.colors ?? []).map((d) => ({ labelValue: d["label-value"], rgba: d.rgba }));
+  return colors.length > 0 ? colors : undefined;
+}
+
+/** Label image metadata shared by every cell of a plate/well grid. */
+type GridLabelSpec = {
+  name: string;
+  resolutions: Array<string>;
+  axisLabels: [...string[], "y", "x"];
+  colors?: Array<OmeColor>;
+  /** Label pixels → image base-resolution pixels (the space grid cells are laid out in). */
+  modelMatrix: Matrix4;
+};
+
+/**
+ * Reads the labels of a representative grid image (e.g. a plate's first well).
+ * Labels whose metadata can't be read are skipped rather than failing the grid.
+ */
+async function loadGridLabelSpecs(
+  image: zarr.Location<zarr.Readable>,
+  imageMultiscales: Ome.Multiscale[],
+): Promise<Array<GridLabelSpec>> {
+  const names = await resolveOmeLabelsFromMultiscales(image);
+  const imageToPixels = utils.coordinateTransformationsToMatrix(imageMultiscales).invert();
+  const specs = await Promise.all(
+    names.map(async (name): Promise<GridLabelSpec | undefined> => {
+      try {
+        const grp = await zarr.open(image.resolve(utils.join("labels", name)), { kind: "group" });
+        const attrs = utils.resolveAttrs(grp.attrs);
+        utils.assert(utils.isOmeImageLabel(attrs), "No 'image-label' metadata.");
+        return {
+          name,
+          resolutions: attrs.multiscales[0].datasets.map((dataset) => dataset.path),
+          axisLabels: utils.getNgffAxisLabels(utils.getNgffAxes(attrs.multiscales)),
+          colors: parseLabelColors(attrs["image-label"]),
+          modelMatrix: imageToPixels.clone().multiplyRight(utils.coordinateTransformationsToMatrix(attrs.multiscales)),
+        };
+      } catch (err) {
+        console.warn(`[vizarr] Skipping label "${name}":`, err);
+        return undefined;
+      }
+    }),
+  );
+  return specs.filter((spec) => spec !== undefined);
+}
+
+/** Opens a grid cell's label pyramids, one entry per spec (undefined if the cell lacks it). */
+async function openGridCellLabels(
+  image: zarr.Location<zarr.Readable>,
+  specs: Array<GridLabelSpec>,
+): Promise<Array<GridCellLabel | undefined>> {
+  return Promise.all(
+    specs.map(async (spec) => {
+      try {
+        const arrs = await Promise.all(
+          spec.resolutions.map(
+            (resolution) =>
+              // @ts-expect-error - ok flag to avoid loading unused attrs
+              zarr.open(image.resolve(utils.join("labels", spec.name, resolution)), {
+                kind: "array",
+                attrs: false,
+              }) as Promise<zarr.Array<zarr.DataType, zarr.Readable>>,
+          ),
+        );
+        const tileSize = utils.guessTileSize(arrs[0]);
+        return {
+          loader: arrs.map((arr) => new ZarrPixelSource(arr, { labels: spec.axisLabels, tileSize })),
+          modelMatrix: spec.modelMatrix,
+        };
+      } catch (err) {
+        utils.rethrowUnless(err, zarr.NodeNotFoundError);
+        return undefined;
+      }
+    }),
+  );
+}
+
+/**
+ * Source-level labels for a grid (used by the menu and for selection mapping),
+ * taken from the first cell that has each label. Labels no cell has are dropped.
+ */
+function resolveGridLabels(specs: Array<GridLabelSpec>, loaders: Array<GridLoader>): ImageLabels {
+  const labels: ImageLabels = [];
+  const keep = specs.map((spec, i) => {
+    const cell = loaders.find((d) => d.labels?.[i]);
+    if (!cell?.labels?.[i]) return false;
+    labels.push({ name: spec.name, loader: cell.labels[i].loader, modelMatrix: spec.modelMatrix, colors: spec.colors });
+    return true;
+  });
+  for (const d of loaders) {
+    d.labels = d.labels?.filter((_, i) => keep[i]);
+  }
+  return labels;
+}
+
+export async function resolveOmeLabelsFromMultiscales(grp: zarr.Location<zarr.Readable>): Promise<Array<string>> {
   return zarr
     .open(grp.resolve("labels"), { kind: "group" })
     .then(({ attrs }) => (utils.resolveAttrs(attrs).labels ?? []) as Array<string>)

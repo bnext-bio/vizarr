@@ -4,8 +4,16 @@ import { Matrix4 } from "math.gl";
 import type { CompositeLayerProps, Layer, PickingInfo, SolidPolygonLayerProps, TextLayerProps } from "deck.gl";
 import type { ZarrPixelSource } from "../ZarrPixelSource";
 import { assert, isInterleaved } from "../utils";
+import { LabelLayer, type OmeColor } from "./label-layer";
 import { MultiscaleImageLayer } from "./viv-layers";
 import type { BaseLayerProps } from "./viv-layers";
+
+/** A label image of a single grid cell. */
+export interface GridCellLabel {
+  loader: ZarrPixelSource[];
+  /** Label pixels → the cell image's base-resolution pixels. */
+  modelMatrix: Matrix4;
+}
 
 export interface GridLoader {
   /** Full resolution pyramid (highest → lowest) for a single grid cell. */
@@ -13,7 +21,16 @@ export interface GridLoader {
   row: number;
   col: number;
   name: string;
+  /** The cell's labels, indexed like the source's labels (undefined if the cell lacks one). */
+  labels?: Array<GridCellLabel | undefined>;
 }
+
+/** Display settings for one of the grid's labels; null when it is hidden. */
+export type GridLabelProps = {
+  selection: number[];
+  opacity: number;
+  colors?: ReadonlyArray<OmeColor>;
+} | null;
 
 type Polygon = Array<[number, number]>;
 
@@ -28,6 +45,8 @@ export interface GridLayerProps
   columns: number;
   spacer?: number;
   text?: boolean;
+  /** Display settings per label, indexed like each cell's `labels`. */
+  labels?: Array<GridLabelProps>;
 }
 
 /** Base (highest-resolution) pixel dimensions of a grid cell. */
@@ -59,6 +78,7 @@ class GridLayer extends CompositeLayer<CompositeLayerProps & GridLayerProps> {
     rows: { type: "number", value: 0, compare: true },
     columns: { type: "number", value: 0, compare: true },
     text: { type: "boolean", value: false, compare: true },
+    labels: { type: "array", value: [], compare: true },
     // Deck.gl
     onClick: { type: "function", value: null, compare: true },
     onHover: { type: "function", value: null, compare: true },
@@ -92,10 +112,10 @@ class GridLayer extends CompositeLayer<CompositeLayerProps & GridLayerProps> {
     // Each cell is its own multiscale image, translated into its grid position.
     // Viv/deck.gl handle viewport culling and per-cell resolution selection, so
     // zooming in fetches higher-resolution tiles only for the cells in view.
+    const cellMatrix = (d: GridLoader) =>
+      baseModelMatrix.clone().translate([d.col * (width + spacer), d.row * (height + spacer), 0]);
     const layers: Layer[] = loaders.map((d) => {
-      const x = d.col * (width + spacer);
-      const y = d.row * (height + spacer);
-      const modelMatrix = baseModelMatrix.clone().translate([x, y, 0]);
+      const modelMatrix = cellMatrix(d);
       const layer = new MultiscaleImageLayer({
         id: `${id}-GridLayer-${d.row}-${d.col}`,
         loader: d.loader,
@@ -111,6 +131,24 @@ class GridLayer extends CompositeLayer<CompositeLayerProps & GridLayerProps> {
       // Viv layers only nominally implement deck's Layer interface.
       return layer as unknown as Layer;
     });
+
+    // Label images, drawn over all cells and positioned like their cell's image.
+    for (const [i, label] of (this.props.labels ?? []).entries()) {
+      if (!label) continue;
+      for (const d of loaders) {
+        const cellLabel = d.labels?.[i];
+        if (!cellLabel) continue;
+        const layer = new LabelLayer({
+          id: `${id}-GridLayer-label-${i}-${d.row}-${d.col}`,
+          loader: cellLabel.loader,
+          modelMatrix: cellMatrix(d).multiplyRight(cellLabel.modelMatrix),
+          selection: label.selection,
+          opacity: label.opacity,
+          colors: label.colors,
+        });
+        layers.push(layer as unknown as Layer);
+      }
+    }
 
     if (this.props.pickable) {
       type Data = { polygon: Polygon };

@@ -189,9 +189,25 @@ const LayerConstructors = {
 
 const layerInstanceFamily = atomFamily((a: Atom<LayerState>) =>
   atom((get) => {
-    const { on, layerProps, kind } = get(a);
+    const { on, layerProps, kind, labels } = get(a);
     if (!on) {
       return null;
+    }
+    if (kind === "grid") {
+      // Grids draw each cell's labels themselves, positioned like the cell.
+      // @ts-expect-error - deck types `loaders` as its own Loader[] (see LayerConstructors below)
+      return new GridLayer({
+        ...(layerProps as GridLayerProps),
+        labels: labels?.map((label) =>
+          label.on
+            ? {
+                selection: label.transformSourceSelection(layerProps.selections[0]),
+                opacity: label.layerProps.opacity,
+                colors: label.layerProps.colors,
+              }
+            : null,
+        ),
+      }) as VizarrLayer;
     }
     const Layer = LayerConstructors[kind];
     // @ts-expect-error - TS can't resolve that Layer & layerProps bound together
@@ -201,8 +217,8 @@ const layerInstanceFamily = atomFamily((a: Atom<LayerState>) =>
 
 const imageLabelsIstanceFamily = atomFamily((a: Atom<LayerState>) =>
   atom((get) => {
-    const { on, labels, layerProps } = get(a);
-    if (!on || !labels) {
+    const { on, labels, layerProps, kind } = get(a);
+    if (!on || !labels || kind === "grid") {
       return [];
     }
     return labels.map((label) =>
