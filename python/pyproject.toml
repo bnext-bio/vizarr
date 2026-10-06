@@ -17,6 +17,7 @@ dev = [
 ]
 examples = [
   "jupyterlab>=4.5.6",
+  "matplotlib>=3.11.2",
   "numba>=0.64.0",
   "obstore>=0.9.2",
   "scikit-image>=0.26.0",

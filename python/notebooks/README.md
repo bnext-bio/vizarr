@@ -33,3 +33,14 @@ underlying generative Zarr store. It dynamically creates "chunks" at different z
 ```bash
 $ jupyter lab mandelbrot.ipynb
 ```
+
+## Syncing the Viewer with Your Notebook
+
+This notebook builds a synthetic HCS plate and shows how to read what is in view
+(`viewer.viewport`: well, position within the well, t/z, ...) and navigate from
+Python (`viewer.go_to`, `viewer.select`). It ends with a dashboard of controls,
+a live readout and a plot that follows the view.
+
+```bash
+$ jupyter lab viewport_sync.ipynb
+```
