@@ -1,11 +1,12 @@
 import DeckGL from "deck.gl";
 import { OrthographicView } from "deck.gl";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import { useViewState } from "../hooks";
 import { DEFAULT_GRID_SPACER } from "../layers/grid-layer";
-import { layerAtoms } from "../state";
+import { layerAtoms, viewportSizeAtom } from "../state";
 import { fitImageToViewport, isGridLayerProps, isInterleaved, resolveLoaderFromLayerProps } from "../utils";
+import { defaultFitPadding } from "../viewport";
 
 import type { DeckGLRef, OrthographicViewState } from "deck.gl";
 import type { VizarrLayer } from "../state";
@@ -16,7 +17,7 @@ export default function Viewer() {
   const [viewState, setViewState] = useViewState();
   const layers = useAtomValue(layerAtoms);
   const firstLayer = layers[0];
-  const [viewport, setViewport] = React.useState<{ width: number; height: number } | null>(null);
+  const [viewport, setViewport] = useAtom(viewportSizeAtom);
 
   // If viewState hasn't been updated, use the first loader to guess viewState
   // TODO: There is probably a better place / way to set the intital view and this is a hack.
@@ -26,7 +27,7 @@ export default function Viewer() {
       fitImageToViewport({
         image: getLayerSize(firstLayer),
         viewport: deck,
-        padding: deck.width < 400 ? 10 : deck.width < 600 ? 30 : 50, // Adjust depending on viewport width.
+        padding: defaultFitPadding(deck), // Adjust depending on viewport width.
         matrix: firstLayer.props.modelMatrix,
       }),
     );
@@ -43,7 +44,7 @@ export default function Viewer() {
           // @ts-expect-error - deck doesn't know this should be ok
           setViewState(e.viewState)
         }
-        onResize={setViewport}
+        onResize={({ width, height }) => setViewport({ width, height })}
         views={[new OrthographicView({ id: "ortho", controller: true })]}
       />
       <Overlays

@@ -105,9 +105,11 @@ export type SourceData = {
   onClick?: (e: OnClickData) => void;
   labels?: ImageLabels;
   /** Physical size of one base-resolution pixel along x, if the metadata has units. */
-  pixel_size?: { size: number; unit: string };
+  pixel_size?: { size: number; sizeY?: number; unit: string };
   /** Label for grid cells in the info overlay, e.g. "Well" (plate) or "Field" (well). */
   cell_label?: string;
+  /** Well name (e.g. "B03") when the source is a single well, whose grid cells are its fields. */
+  well?: string;
   /** Info overlay & scale bar settings, resolved from the config in `addImageAtom`. */
   display?: { scalebar: boolean; overlay: boolean; description?: string };
 };
@@ -133,6 +135,8 @@ export type LayerState<T extends LayerType = LayerType> = {
 type WithId<T> = T & { id: string };
 
 export const viewStateAtom = atom<ViewState | null>(null);
+/** Size of the deck.gl canvas in screen pixels, once it has been laid out. */
+export const viewportSizeAtom = atom<{ width: number; height: number } | null>(null);
 export const sourceErrorAtom = atom<string | null>(null);
 
 export interface Redirect {
@@ -169,6 +173,31 @@ export const addImageAtom = atom(null, async (get, set, config: ImageLayerConfig
 });
 
 export const sourceInfoAtomAtoms = splitAtom(sourceInfoAtom);
+
+/**
+ * Sets the index of named non-channel axes (e.g. `{ t: 3, z: 10 }`) on every layer
+ * that has them, for all of its channels. Indices are clamped to the axis size.
+ */
+export const setAxisSelectionAtom = atom(null, (get, set, update: Record<string, number>) => {
+  for (const source of get(sourceInfoAtom)) {
+    const { shape } = source.loader[0];
+    const changes: Array<[axis: number, index: number]> = [];
+    for (const [name, index] of Object.entries(update)) {
+      const axis = source.axis_labels.indexOf(name);
+      if (axis < 0 || axis === source.channel_axis || name === "x" || name === "y") continue;
+      changes.push([axis, Math.min(Math.max(Math.round(index), 0), shape[axis] - 1)]);
+    }
+    if (changes.length === 0) continue;
+    const layerAtom = layerFamilyAtom(source);
+    const layer = get(layerAtom);
+    const selections = layer.layerProps.selections.map((selection) => {
+      const next = [...selection];
+      for (const [axis, index] of changes) next[axis] = index;
+      return next;
+    });
+    set(layerAtom, { ...layer, layerProps: { ...layer.layerProps, selections } } as typeof layer);
+  }
+});
 
 export const layerFamilyAtom: AtomFamily<WithId<SourceData>, PrimitiveAtom<WithId<LayerState>>> = atomFamily(
   (param: WithId<SourceData>) => atom({ ...initLayerStateFromSource(param), id: param.id }),

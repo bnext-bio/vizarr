@@ -113,6 +113,7 @@ export async function loadWell(
     name: `Well ${row}${col}`,
     pixel_size: utils.getPhysicalPixelSize(imgAttrs.multiscales),
     cell_label: "Field",
+    well: `${row}${col}`,
     labels: resolveGridLabels(labelSpecs, loaders),
   };
 

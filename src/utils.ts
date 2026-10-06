@@ -176,18 +176,24 @@ export function getNgffAxes(multiscales: Ome.Multiscale[]): Ome.Axis[] {
  * the first dataset's `coordinateTransformations` (OME-NGFF v0.4+). Returns
  * undefined when the metadata doesn't declare a unit for the x axis.
  */
-export function getPhysicalPixelSize(multiscales: Ome.Multiscale[]): { size: number; unit: string } | undefined {
+export function getPhysicalPixelSize(
+  multiscales: Ome.Multiscale[],
+): { size: number; sizeY: number; unit: string } | undefined {
   const axes = getNgffAxes(multiscales);
   const xIndex = axes.findIndex((axis) => axis.type === "space" && axis.name === "x");
+  const yIndex = axes.findIndex((axis) => axis.type === "space" && axis.name === "y");
   const unit = axes[xIndex]?.unit;
   if (!unit) return undefined;
   let size = 1;
+  let sizeY = 1;
   for (const transform of multiscales[0].datasets[0]?.coordinateTransformations ?? []) {
     if (transform.type === "scale" && transform.scale.length === axes.length) {
       size *= transform.scale[xIndex];
+      if (yIndex >= 0) sizeY *= transform.scale[yIndex];
     }
   }
-  return Number.isFinite(size) && size > 0 ? { size, unit } : undefined;
+  const valid = (n: number) => Number.isFinite(n) && n > 0;
+  return valid(size) ? { size, sizeY: valid(sizeY) ? sizeY : size, unit } : undefined;
 }
 
 export function getNgffAxisLabels(axes: Ome.Axis[]): [...string[], "y", "x"] {
@@ -715,11 +721,15 @@ if (import.meta.vitest) {
           ],
         },
       ]);
-      expect(size).toEqual({ size: 0.65, unit: "micrometer" });
+      expect(size).toEqual({ size: 0.65, sizeY: 0.5, unit: "micrometer" });
     });
 
     it("defaults to a unit scale when there is no scale transform", () => {
-      expect(getPhysicalPixelSize([{ axes, datasets: [{ path: "0" }] }])).toEqual({ size: 1, unit: "micrometer" });
+      expect(getPhysicalPixelSize([{ axes, datasets: [{ path: "0" }] }])).toEqual({
+        size: 1,
+        sizeY: 1,
+        unit: "micrometer",
+      });
     });
 
     it("returns undefined without a unit", () => {

@@ -1,4 +1,6 @@
 import numpy as np
+import pytest
+import traitlets
 import zarr
 import zarr.storage
 from inline_snapshot import snapshot
@@ -99,3 +101,42 @@ image[2]:
   disable_well_links=True
   source={'id': 0}\
 """)
+
+
+def sent_messages(v: vizarr.Viewer, monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Capture custom messages the viewer sends to the front end."""
+    messages: list[object] = []
+    monkeypatch.setattr(v, "send", lambda content, *_: messages.append(content))
+    return messages
+
+
+def test_go_to_sends_navigate_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    v = vizarr.Viewer()
+    messages = sent_messages(v, monkeypatch)
+    v.go_to("B03")
+    v.go_to(x=10.5, y=20, units="physical", zoom=2)
+    v.go_to(field=1)
+    assert messages == [
+        {"type": "navigate", "options": {"well": "B03", "units": "pixel"}},
+        {
+            "type": "navigate",
+            "options": {"x": 10.5, "y": 20, "zoom": 2, "units": "physical"},
+        },
+        {"type": "navigate", "options": {"field": 1, "units": "pixel"}},
+    ]
+
+
+def test_select_sends_axis_indices(monkeypatch: pytest.MonkeyPatch) -> None:
+    v = vizarr.Viewer()
+    messages = sent_messages(v, monkeypatch)
+    v.select(t=3, z=10)
+    assert messages == [{"type": "select", "selection": {"t": 3, "z": 10}}]
+
+
+def test_viewport_is_read_only_but_synced_from_front_end():
+    v = vizarr.Viewer()
+    assert v.viewport == {}
+    with pytest.raises(traitlets.TraitError):
+        v.viewport = {"well": "A01"}
+    v.set_state({"viewport": {"well": "A01", "selection": {"z": 2}}})
+    assert v.viewport == {"well": "A01", "selection": {"z": 2}}
