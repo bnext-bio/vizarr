@@ -1,0 +1,2 @@
+import{__vitePreload as e}from"./vizarr-Dkew10h2.js";var t=`https://cdn.jsdelivr.net/gh/mozilla/pdf.js@30bd5f0/src/core/jpx.js`,n=class n{kind=`bytes_to_bytes`;static codecId=`jpeg2k`;static fromConfig(){return new n}encode(e){throw Error(`encode not implemented`)}async decode(n){let{JpxImage:r}=await e(async()=>{let{JpxImage:e}=await import(t);return{JpxImage:e}},[],import.meta.url),i=new r;return i.failOnCorruptedImage=!0,i.parse(n),i.tiles[0].items}};export{n as default};
+//# sourceMappingURL=jpeg2k-BsbFm4_u.js.map
